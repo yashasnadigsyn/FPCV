@@ -13,8 +13,6 @@ if len(img_bgr.shape) > 2:
 else:
     gray_image = img_bgr
 
-print("--- Step 1: Analyzing Histogram ---")
-
 fig_hist, axes_hist = plt.subplots(1, 2, figsize=(12, 5))
 fig_hist.suptitle('Histogram Analysis', fontsize=16)
 

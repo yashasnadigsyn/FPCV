@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import math
 import cv2
 
-img = cv2.imread('spanner.png')
+img = cv2.imread('chika.jpeg')
 img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
 if len(img.shape) > 2:
