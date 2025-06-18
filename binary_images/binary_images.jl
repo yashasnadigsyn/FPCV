@@ -28,13 +28,6 @@ histogram(vec(reinterpret(UInt8, chika_resized)))
 threshold_normalized = Gray(100/255)
   ╠═╡ =#
 
-# ╔═╡ facccdc3-6b76-4d03-a8a5-732469bcbce4
-## area
-begin
-	area = sum(chika_resized)
-	println("Area: $area pixels")
-end
-
 # ╔═╡ 79d89f45-c202-41dc-a217-b76631f49316
 function visualize_geometric_properties(
     binary_image::AbstractMatrix{Bool};
@@ -152,44 +145,6 @@ binary_chika = chika_resized .> threshold_normalized
 
 # ╔═╡ 91c71f91-acb0-4d8b-a3e5-588e383487db
 mosaicview(chika_resized, binary_chika; nrow=1)
-
-# ╔═╡ c449c5cd-e5a6-4abe-9a81-035adbd0c72e
-## Centroid
-begin
-	rows, cols = size(binary_chika)
-	indices = CartesianIndices(binary_chika)
-	i_coords = getindex.(indices, 1)
-	j_coords = getindex.(indices, 2)
-	j_bar = sum(binary_chika .* j_coords) / area
-	i_bar = sum(binary_chika .* i_coords) / area
-	@printf("Centroid (x, y): (%.2f, %.2f)\n", j_bar, i_bar)
-end
-
-# ╔═╡ 738c043b-fae1-46c6-b931-8b3a83f05b86
-## Orientation and Roundedness
-begin
-	a_dash = sum(binary_chika .* (j_coords .^ 2))
-	c_dash = sum(binary_chika .* (i_coords .^ 2))
-	b_dash = 2 * sum(binary_chika .* i_coords .* j_coords)
-
-	a = a_dash - area * (j_bar ^ 2)
-	c = c_dash - area * (i_bar ^ 2)
-	b = b_dash - 2 * area * j_bar * i_bar
-
-	two_theta = atan(b, a - c)
-	theta1 = two_theta / 2.0
-	@printf("Orientation: %.2f degrees\n", rad2deg(theta1))
-
-	theta2 = theta1 + pi / 2
-	e1 = a * sin(theta1)^2 - b * sin(theta1) * cos(theta1) + c * cos(theta1)^2
-	e2 = a * sin(theta2)^2 - b * sin(theta2) * cos(theta2) + c * cos(theta2)^2
-
-	e_min = min(e1, e2)
-	e_max = max(e1, e2)
-
-	roundedness = (e_max == 0) ? 1.0 : e_min / e_max
-	@printf("Roundedness: %.2f\n", roundedness)
-end
 
 # ╔═╡ 7e18d02d-648d-4d5f-81c8-5a70023f584b
 chika_props = visualize_geometric_properties(binary_chika)
@@ -323,7 +278,361 @@ end
 mosaicview([Gray.(component) for component in all_components_after]; nrow=1)
 
 # ╔═╡ 46e7c522-5ccc-4857-8fc0-ab3cdad1a2b6
+## Boundary Following
 
+# ╔═╡ 879e2143-d342-4c28-8562-a879b34861c9
+hearty = Gray.(load("hearty.png"))
+
+# ╔═╡ a8957fa7-8ea6-4d62-aadb-e4731c5b2312
+threshold_hearty = Gray(50/255)
+
+# ╔═╡ c57ecac8-6300-4990-97f6-561160bf5654
+hearty_resized = imresize(hearty, (300, 300))
+
+# ╔═╡ 2f5adea4-b6c7-414d-8c34-b99bcef6fb1b
+binary_hearty = hearty_resized .> threshold_hearty
+
+# ╔═╡ 973c851c-f8b3-4d19-b5a0-118a7e912860
+mosaicview(Gray.(binary_hearty))
+
+# ╔═╡ 178a3b83-b97b-493d-acfb-2c7d61bbfae2
+const CLOCKWISE_NEIGHBORS = (
+        CartesianIndex(0, -1), CartesianIndex(-1, -1), CartesianIndex(-1, 0),
+        CartesianIndex(-1, 1), CartesianIndex(0, 1),   CartesianIndex(1, 1),
+        CartesianIndex(1, 0),  CartesianIndex(1, -1)
+    )
+
+# ╔═╡ 345dfe53-b82c-4df1-8572-61288b1d1fd5
+function boundary_pixel_finder(binary_image::BitMatrix)
+	s = findfirst(binary_image) ## return first pixel which is true
+	
+	if isnothing(s)
+        println("No object found in the image.")
+        return Vector{CartesianIndex{2}}()
+    end
+
+	boundary = Vector{CartesianIndex{2}}()
+	push!(boundary, s)
+
+	c = s
+	b = s + CartesianIndex(0, -1)
+
+	while true
+		offset_b = b-c
+		start_search_idx = findfirst(==(offset_b), CLOCKWISE_NEIGHBORS)
+		found_next_pixel = false
+
+		for i in 0:7
+			idx = mod1(start_search_idx+i, 8)
+			neighbor = c + CLOCKWISE_NEIGHBORS[idx]
+			if checkbounds(Bool, binary_image, neighbor) && binary_image[neighbor]
+				c = neighbor
+				prev_idx = mod1(idx - 1, 8)
+				b = c + CLOCKWISE_NEIGHBORS[prev_idx]
+				push!(boundary, c)
+				found_next_pixel = true
+				break
+			end
+		end
+
+		if !found_next_pixel
+			break
+		end
+
+		if c == s
+			break
+		end
+	end
+	return boundary
+end
+
+# ╔═╡ 88b42eb5-2489-4d4b-9df0-02dcd27b23f0
+boundary_hearty = boundary_pixel_finder(binary_hearty)
+
+# ╔═╡ 76e9bd3c-6bde-4fbd-b717-86fc2d4673bc
+begin
+	boundary_image = falses(size(binary_hearty))
+	for point in boundary_hearty
+	    boundary_image[point] = true
+	end
+end
+
+# ╔═╡ 75d015f6-2923-486a-84fb-989922358ab9
+mosaicview(Gray.(binary_hearty), Gray.(boundary_image); nrow=1)
+
+# ╔═╡ 142e6347-0b02-4752-83b6-4f3cbfaefc47
+perimeter = length(boundary_hearty)
+
+# ╔═╡ c449c5cd-e5a6-4abe-9a81-035adbd0c72e
+## Centroid
+begin
+	rows, cols = size(binary_chika)
+	indices = CartesianIndices(binary_chika)
+	i_coords = getindex.(indices, 1)
+	j_coords = getindex.(indices, 2)
+	j_bar = sum(binary_chika .* j_coords) / area
+	i_bar = sum(binary_chika .* i_coords) / area
+	@printf("Centroid (x, y): (%.2f, %.2f)\n", j_bar, i_bar)
+end
+
+# ╔═╡ 738c043b-fae1-46c6-b931-8b3a83f05b86
+## Orientation and Roundedness
+begin
+	a_dash = sum(binary_chika .* (j_coords .^ 2))
+	c_dash = sum(binary_chika .* (i_coords .^ 2))
+	b_dash = 2 * sum(binary_chika .* i_coords .* j_coords)
+
+	a = a_dash - area * (j_bar ^ 2)
+	c = c_dash - area * (i_bar ^ 2)
+	b = b_dash - 2 * area * j_bar * i_bar
+
+	two_theta = atan(b, a - c)
+	theta1 = two_theta / 2.0
+	@printf("Orientation: %.2f degrees\n", rad2deg(theta1))
+
+	theta2 = theta1 + pi / 2
+	e1 = a * sin(theta1)^2 - b * sin(theta1) * cos(theta1) + c * cos(theta1)^2
+	e2 = a * sin(theta2)^2 - b * sin(theta2) * cos(theta2) + c * cos(theta2)^2
+
+	e_min = min(e1, e2)
+	e_max = max(e1, e2)
+
+	roundedness = (e_max == 0) ? 1.0 : e_min / e_max
+	@printf("Roundedness: %.2f\n", roundedness)
+end
+
+# ╔═╡ 0b4030f8-43cf-449e-a1c9-b76200994b31
+compactness = (perimeter ^ 2)/area
+
+# ╔═╡ a07b377b-132c-4b68-a3ce-757a5c0cb3a0
+function distance_transform_scratch(binary_image::BitMatrix)
+    rows, cols = size(binary_image)
+    
+    dist_map = [p ? typemax(Int32) : 0 for p in binary_image]
+
+    for i in 1:rows
+        for j in 1:cols
+            if binary_image[i, j]
+                dist_up = (i > 1) ? dist_map[i-1, j] : typemax(Int32)
+                dist_left = (j > 1) ? dist_map[i, j-1] : typemax(Int32)
+                dist_map[i, j] = min(dist_up, dist_left) + 1
+            end
+        end
+    end
+
+    for i in rows:-1:1
+        for j in cols:-1:1
+            if binary_image[i, j]
+                dist_down = (i < rows) ? dist_map[i+1, j] : typemax(Int32)
+                dist_right = (j < cols) ? dist_map[i, j+1] : typemax(Int32)
+                dist_map[i, j] = min(dist_map[i, j], min(dist_down, dist_right) + 1)
+            end
+        end
+    end
+    
+    return dist_map
+end
+
+# ╔═╡ 4be1d4dd-34ac-4faa-8311-7c4419db01f4
+function local_maxima(dist_map::Matrix)
+    rows, cols = size(dist_map)
+	
+    skeleton = falses(rows, cols)
+
+    for i in 2:(rows-1)
+        for j in 2:(cols-1)
+            center_val = dist_map[i, j]
+
+            if center_val == 0
+                continue
+            end
+            
+            is_maximum = true
+			
+            for ni in -1:1
+                for nj in -1:1
+
+                    if ni == 0 && nj == 0
+                        continue
+                    end
+                    
+                    if dist_map[i+ni, j+nj] > center_val
+                        is_maximum = false
+                        break
+                    end
+                end
+                if !is_maximum
+                    break 
+                end
+            end
+            
+            if is_maximum
+                skeleton[i, j] = true
+            end
+        end
+    end
+    
+    return skeleton
+end
+
+# ╔═╡ 30e86c34-d206-4b45-a605-432ceec2684a
+function medial_axis(binary_image::BitMatrix)
+    dist_map = distance_transform_scratch(binary_image)
+    skeleton = local_maxima(dist_map)
+    
+    return skeleton, dist_map
+end
+
+# ╔═╡ 5b22dfe6-c41d-42bb-9f7c-1dd89459c2e7
+skeleton, dist_map = medial_axis(binary_hearty)
+
+# ╔═╡ b6250970-013d-42fd-b84a-6a9f0440a422
+begin
+	max_dist = maximum(dist_map)
+	normalized_dist_map = Gray.(dist_map ./ max_dist)
+end
+
+# ╔═╡ 8a62565f-2ac1-4644-a427-0fe31c626902
+mosaicview(
+    Gray.(binary_hearty),
+    normalized_dist_map,
+    Gray.(skeleton);
+    nrow=1, npad=10, fillvalue=colorant"white",
+    rowlabels=["Original", "Distance Transform", "Final Skeleton"]
+)
+
+# ╔═╡ 5e5a0372-707e-4a3b-be23-a116f30e6b75
+skeleton_chika, dist_map_chika = medial_axis(binary_chika)
+
+# ╔═╡ 7554d85a-378a-439c-a589-1705eeede886
+begin
+	max_dist_chika = maximum(dist_map_chika)
+	normalized_dist_map_chika = Gray.(dist_map_chika ./ max_dist)
+end
+
+# ╔═╡ a3945576-5f08-4698-b555-dff9cb48da43
+mosaicview(
+    Gray.(binary_chika),
+    normalized_dist_map_chika,
+    Gray.(skeleton_chika);
+    nrow=1, npad=10, fillvalue=colorant"white",
+    rowlabels=["Original", "Distance Transform", "Final Skeleton"]
+)
+
+# ╔═╡ d0e4ad79-2972-4004-b403-ced7fbadbd50
+## Zhang-Suen Thinning Algorithm
+
+# ╔═╡ 76579a01-908f-4471-a054-dfc59fb9b9fb
+function do_thinning(binary_image::BitMatrix)
+	img = copy(binary_image)
+    rows, cols = size(img)
+
+	while true
+		pixels_removed_in_iteration = 0
+
+		## Iteration 1
+		pixels_to_delete = Set{CartesianIndex{2}}()
+		for i in 2:(rows-1), j in 2:(cols-1)
+			## Condition 1
+			if !img[i, j]; continue; end
+
+			p2 = img[i-1, j];   p3 = img[i-1, j+1]; p4 = img[i, j+1];
+            p5 = img[i+1, j+1]; p6 = img[i+1, j];   p7 = img[i+1, j-1];
+            p8 = img[i, j-1];   p9 = img[i-1, j-1];
+
+			## Condition 2
+			B = p2 + p3 + p4 + p5 + p6 + p7 + p8 + p9
+			if !(2 <= B <= 6); continue; end
+
+			## Condition 3
+			A = (p2==0 && p3==1) + (p3==0 && p4==1) + (p4==0 && p5==1) + 
+                (p5==0 && p6==1) + (p6==0 && p7==1) + (p7==0 && p8==1) + 
+                (p8==0 && p9==1) + (p9==0 && p2==1)
+            if A != 1; continue; end
+
+			## Condition 4 and 5 for Iteration 1
+			if !(p2*p4*p6 == 0 && p4*p6*p8 == 0); continue; end
+
+			 push!(pixels_to_delete, CartesianIndex(i, j))
+		end
+
+		for p in pixels_to_delete
+            img[p] = 0
+        end
+        pixels_removed_in_iteration += length(pixels_to_delete)
+
+		## Iteration 2
+		empty!(pixels_to_delete)
+		for i in 2:(rows-1), j in 2:(cols-1)
+			
+			## Condition 1
+			if !img[i, j]; continue; end
+
+			## Condition 2
+			p2 = img[i-1, j];   p3 = img[i-1, j+1]; p4 = img[i, j+1];
+            p5 = img[i+1, j+1]; p6 = img[i+1, j];   p7 = img[i+1, j-1];
+            p8 = img[i, j-1];   p9 = img[i-1, j-1];
+
+			## Condition 3
+            B = p2 + p3 + p4 + p5 + p6 + p7 + p8 + p9
+            if !(2 <= B <= 6); continue; end
+
+			## Condition 4
+            A = (p2==0 && p3==1) + (p3==0 && p4==1) + (p4==0 && p5==1) + 
+                (p5==0 && p6==1) + (p6==0 && p7==1) + (p7==0 && p8==1) + 
+                (p8==0 && p9==1) + (p9==0 && p2==1)
+            if A != 1; continue; end
+            
+            # Condition 4 & 5 for Iteration 2
+            if !(p2*p4*p8 == 0 && p2*p6*p8 == 0); continue; end
+            
+            push!(pixels_to_delete, CartesianIndex(i, j))
+		end
+
+		for p in pixels_to_delete
+            img[p] = false
+        end
+        pixels_removed_in_iteration += length(pixels_to_delete)
+
+		if pixels_removed_in_iteration == 0
+            break
+        end
+	end
+
+	return img
+end
+
+# ╔═╡ db0bd8d6-dfaf-4d75-8410-495c7731b955
+skeleton_thinning = do_thinning(binary_hearty)
+
+# ╔═╡ 0e9e6ea6-4b2f-420f-968d-7a7625ab45ce
+skeleton_library = thinning(binary_hearty)
+
+# ╔═╡ 45aa38fd-2329-4217-8ad3-840f798e7903
+mosaicview(
+    Gray.(binary_hearty),
+    Gray.(skeleton_thinning),
+    Gray.(skeleton_library),
+	Gray.(skeleton);
+    nrow=1, npad=10,
+    rowlabels=["Original", "From Scratch", "Library Function"]
+)
+
+# ╔═╡ 0c90f939-75d3-4c60-841e-ce364e72569d
+
+
+# ╔═╡ facccdc3-6b76-4d03-a8a5-732469bcbce4
+# ╠═╡ disabled = true
+#=╠═╡
+## area
+begin
+	area = sum(chika_resized)
+	println("Area: $area pixels")
+end
+  ╠═╡ =#
+
+# ╔═╡ 8aabc34e-149e-4b13-aabb-dfd64ec0ac0b
+area = sum(binary_hearty)
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -2646,5 +2955,33 @@ version = "1.8.1+0"
 # ╠═ba521d7f-8176-43c7-8ec6-dfa29dec5f39
 # ╠═ffdddbab-02ef-4329-a75d-ccb6613d0d44
 # ╠═46e7c522-5ccc-4857-8fc0-ab3cdad1a2b6
+# ╠═879e2143-d342-4c28-8562-a879b34861c9
+# ╠═a8957fa7-8ea6-4d62-aadb-e4731c5b2312
+# ╠═c57ecac8-6300-4990-97f6-561160bf5654
+# ╠═2f5adea4-b6c7-414d-8c34-b99bcef6fb1b
+# ╠═973c851c-f8b3-4d19-b5a0-118a7e912860
+# ╠═178a3b83-b97b-493d-acfb-2c7d61bbfae2
+# ╠═345dfe53-b82c-4df1-8572-61288b1d1fd5
+# ╠═88b42eb5-2489-4d4b-9df0-02dcd27b23f0
+# ╠═76e9bd3c-6bde-4fbd-b717-86fc2d4673bc
+# ╠═75d015f6-2923-486a-84fb-989922358ab9
+# ╠═142e6347-0b02-4752-83b6-4f3cbfaefc47
+# ╠═8aabc34e-149e-4b13-aabb-dfd64ec0ac0b
+# ╠═0b4030f8-43cf-449e-a1c9-b76200994b31
+# ╠═a07b377b-132c-4b68-a3ce-757a5c0cb3a0
+# ╠═4be1d4dd-34ac-4faa-8311-7c4419db01f4
+# ╠═30e86c34-d206-4b45-a605-432ceec2684a
+# ╠═5b22dfe6-c41d-42bb-9f7c-1dd89459c2e7
+# ╠═b6250970-013d-42fd-b84a-6a9f0440a422
+# ╠═8a62565f-2ac1-4644-a427-0fe31c626902
+# ╠═5e5a0372-707e-4a3b-be23-a116f30e6b75
+# ╠═7554d85a-378a-439c-a589-1705eeede886
+# ╠═a3945576-5f08-4698-b555-dff9cb48da43
+# ╠═d0e4ad79-2972-4004-b403-ced7fbadbd50
+# ╠═76579a01-908f-4471-a054-dfc59fb9b9fb
+# ╠═db0bd8d6-dfaf-4d75-8410-495c7731b955
+# ╠═0e9e6ea6-4b2f-420f-968d-7a7625ab45ce
+# ╠═45aa38fd-2329-4217-8ad3-840f798e7903
+# ╠═0c90f939-75d3-4c60-841e-ce364e72569d
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
