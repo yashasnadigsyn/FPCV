@@ -28,6 +28,16 @@ histogram(vec(reinterpret(UInt8, chika_resized)))
 threshold_normalized = Gray(100/255)
   ╠═╡ =#
 
+# ╔═╡ facccdc3-6b76-4d03-a8a5-732469bcbce4
+# ╠═╡ disabled = true
+#=╠═╡
+## area
+begin
+	area = sum(chika_resized)
+	println("Area: $area pixels")
+end
+  ╠═╡ =#
+
 # ╔═╡ 79d89f45-c202-41dc-a217-b76631f49316
 function visualize_geometric_properties(
     binary_image::AbstractMatrix{Bool};
@@ -363,6 +373,9 @@ mosaicview(Gray.(binary_hearty), Gray.(boundary_image); nrow=1)
 # ╔═╡ 142e6347-0b02-4752-83b6-4f3cbfaefc47
 perimeter = length(boundary_hearty)
 
+# ╔═╡ 8aabc34e-149e-4b13-aabb-dfd64ec0ac0b
+area = sum(binary_hearty)
+
 # ╔═╡ c449c5cd-e5a6-4abe-9a81-035adbd0c72e
 ## Centroid
 begin
@@ -619,20 +632,67 @@ mosaicview(
 )
 
 # ╔═╡ 0c90f939-75d3-4c60-841e-ce364e72569d
+## Expanding and Shrinking
 
+# ╔═╡ e0bdd18f-20dc-492a-ae85-fc66c3282005
+expanding_img_input, shrinking_img_input = copy(binary_hearty), copy(binary_hearty)
 
-# ╔═╡ facccdc3-6b76-4d03-a8a5-732469bcbce4
-# ╠═╡ disabled = true
-#=╠═╡
-## area
-begin
-	area = sum(chika_resized)
-	println("Area: $area pixels")
+# ╔═╡ 48b8479b-2234-4571-aab0-df8a741f7a14
+function expand_image(expanding_img_input::BitMatrix)
+	expanding_img_output = copy(expanding_img_input)
+	rows_exp, cols_exp = size(expanding_img_input)
+	
+	for i in 2:(rows_exp-1), j in 2:(cols_exp-1)
+		if expanding_img_input[i, j]
+			for ni in -1:1, nj in -1:1
+				expanding_img_output[i+ni, j+nj] = true
+			end
+		end
+	end
+
+	return expanding_img_output
 end
-  ╠═╡ =#
 
-# ╔═╡ 8aabc34e-149e-4b13-aabb-dfd64ec0ac0b
-area = sum(binary_hearty)
+# ╔═╡ e364f68a-451b-4fd0-83cd-b5a342caae66
+function shrink_image(shrinking_img_input::BitMatrix)
+	shrinking_output_image = copy(shrinking_img_input)
+	rows_shri, cols_shri = size(shrinking_img_input)
+	
+	for i in 2:(rows_shri-1), j in 2:(cols_shri-1)
+		has_background_neighbor = false
+		for ni in -1:1, nj in -1:1
+			if !shrinking_img_input[i+ni, j+nj]
+				has_background_neighbor = true
+				break
+			end
+		end
+	
+		if has_background_neighbor
+			shrinking_output_image[i, j] = false
+		end
+	end
+
+	return shrinking_output_image
+end
+
+# ╔═╡ e7b0f36b-9bb7-44a1-8728-e2fbf83057e1
+for _ in 1:5000
+	global expanded_img = expand_image(expanding_img_input)
+end
+
+# ╔═╡ af13f2f2-cc01-43e6-a7fb-7fd1b780e959
+for _ in 1:5000
+	global shrunk_img = shrink_image(shrinking_img_input)
+end
+
+# ╔═╡ 08274f49-c9f0-41bd-bc37-7217b5537336
+mosaicview(
+    Gray.(binary_hearty),
+    Gray.(expanded_img),
+    Gray.(shrunk_img);
+    nrow=1, npad=10,
+    rowlabels=["Original", "Expanded (Dilated)", "Shrunk (Eroded)"]
+)
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -2983,5 +3043,11 @@ version = "1.8.1+0"
 # ╠═0e9e6ea6-4b2f-420f-968d-7a7625ab45ce
 # ╠═45aa38fd-2329-4217-8ad3-840f798e7903
 # ╠═0c90f939-75d3-4c60-841e-ce364e72569d
+# ╠═e0bdd18f-20dc-492a-ae85-fc66c3282005
+# ╠═48b8479b-2234-4571-aab0-df8a741f7a14
+# ╠═e364f68a-451b-4fd0-83cd-b5a342caae66
+# ╠═e7b0f36b-9bb7-44a1-8728-e2fbf83057e1
+# ╠═af13f2f2-cc01-43e6-a7fb-7fd1b780e959
+# ╠═08274f49-c9f0-41bd-bc37-7217b5537336
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
