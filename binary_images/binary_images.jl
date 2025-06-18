@@ -5,7 +5,7 @@ using Markdown
 using InteractiveUtils
 
 # ╔═╡ c6c9d11c-4bf8-11f0-24ad-9307a11db30e
-using Images, MosaicViews, Plots, Printf, ImageDraw, Colors, Random, Makie , CairoMakie, StatsBase
+using Images, MosaicViews, Plots, Printf, ImageDraw, Colors, Random, Makie , CairoMakie, StatsBase, ImageComponentAnalysis
 
 # ╔═╡ 6ee33701-7b5b-49e2-a4fd-624a9dcfc303
 # Binary Images
@@ -694,11 +694,106 @@ mosaicview(
     rowlabels=["Original", "Expanded (Dilated)", "Shrunk (Eroded)"]
 )
 
+# ╔═╡ 7938c75d-b3c9-45de-9e13-208ab4389d91
+## OCR
+
+# ╔═╡ f9d5e221-1a26-454d-84c1-98df95876575
+template_A = load("A.png")
+
+# ╔═╡ 9f809ece-9f79-49ba-978f-a143b02b9c52
+binary_template_A = Gray.(template_A) .> 0.5
+
+# ╔═╡ 59ccb51d-39a9-48e6-a60d-95d22beb65c3
+binary_template_A_resized = imresize(binary_template_A, (439, 639))
+
+# ╔═╡ 2ec5e25f-038b-4913-a0ac-d51fabde4be3
+begin
+    erosion_amount = 4
+    model_A = binary_template_A_resized
+    for _ in 1:erosion_amount
+        model_A = erode(model_A)
+    end
+    model_A = model_A .> 0.5  
+end
+
+# ╔═╡ dcdecba1-85c1-4e4c-b722-70fa91e84c38
+Gray.(model_A)
+
+# ╔═╡ cc3cf8af-6467-4693-bc40-77088a89d035
+test_image = load("Test2.png")
+
+# ╔═╡ 2f597403-3fa1-4c46-baeb-b9dc443cd5f7
+cleaned_test_image = opening(Gray.(test_image))
+
+# ╔═╡ 2d2f6725-f0e6-4063-a21e-43c08286fe98
+erosion_result = erode(cleaned_test_image, model_A)
+
+# ╔═╡ 5e359c07-9bbd-4d9c-98fd-38e5f8d846d4
+begin
+    binary_erosion_result = erosion_result .> 0.5
+    
+    labeled_hits = connected_components_labeling(binary_erosion_result)
+
+    filtered_hits = filter_components_by_size(labeled_hits, min_size=1)
+    
+    unique_labels = filter(l -> l != 0, unique(filtered_hits))
+    detected_locations = []
+    
+    for label in unique_labels
+        component_mask = (filtered_hits .== label)
+        rows, cols = size(component_mask)
+        i_coords = getindex.(CartesianIndices(component_mask), 1)
+        j_coords = getindex.(CartesianIndices(component_mask), 2)
+        
+        area = sum(component_mask)
+        if area > 0
+            j_bar = sum(component_mask .* j_coords) / area
+            i_bar = sum(component_mask .* i_coords) / area
+            push!(detected_locations, (round(Int, j_bar), round(Int, i_bar)))
+        end
+    end
+    
+end
+
+# ╔═╡ bd424fe7-c49b-4a7c-bd87-da8c68d29c63
+begin
+    canvas = RGB.(Gray.(test_image))
+    
+    h, w = size(binary_template_A_resized)
+    
+    for (x, y) in detected_locations
+        top = y - h÷2
+        left = x - w÷2
+        bottom = y + h÷2
+        right = x + w÷2
+        draw!(canvas, LineSegment(ImageDraw.Point(left, top), ImageDraw.Point(right, top)), colorant"red")
+        draw!(canvas, LineSegment(ImageDraw.Point(left, top), ImageDraw.Point(left, bottom)), colorant"red")
+        draw!(canvas, LineSegment(ImageDraw.Point(right, top), ImageDraw.Point(right, bottom)), colorant"red")
+        draw!(canvas, LineSegment(ImageDraw.Point(left, bottom), ImageDraw.Point(right, bottom)), colorant"red")
+    end
+
+end
+
+# ╔═╡ 9d2c4ff0-6626-4a69-9347-c2b300954cea
+mosaicview(
+	Gray.(binary_template_A), Gray.(model_A),
+	Gray.(test_image), Gray.(erosion_result),
+	canvas;
+	nrow=2, npad=10,
+)
+
+# ╔═╡ 2d571042-4e4a-43ff-a376-862e0cb8c5c4
+@printf("Found %d instances of the character 'A'.\n", length(detected_locations))
+
+# ╔═╡ e59ebf54-233f-42cb-84a4-19f24f4f94b3
+
+
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
 [deps]
 CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
 Colors = "5ae59095-9a9b-59fe-a467-6f913c188581"
+ImageComponentAnalysis = "d9b9e9a0-1569-11e9-2cb5-bbca914b0e89"
 ImageDraw = "4381153b-2b60-58ae-a1ba-fd683676385f"
 Images = "916415d5-f1e6-5110-898d-aaa5f9f070e0"
 Makie = "ee78f7c6-11fb-53f2-987a-cfe4a2b5a57a"
@@ -711,6 +806,7 @@ StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
 [compat]
 CairoMakie = "~0.14.0"
 Colors = "~0.13.1"
+ImageComponentAnalysis = "~0.2.2"
 ImageDraw = "~0.2.6"
 Images = "~0.26.2"
 Makie = "~0.23.0"
@@ -725,7 +821,7 @@ PLUTO_MANIFEST_TOML_CONTENTS = """
 
 julia_version = "1.11.5"
 manifest_format = "2.0"
-project_hash = "fa3350554f081aeff13dfa2f2d36b8dc147c18ee"
+project_hash = "bd29ed8582e7b39daa74e2a6d98c324ed9c1d56b"
 
 [[deps.AbstractFFTs]]
 deps = ["LinearAlgebra"]
@@ -1025,6 +1121,16 @@ git-tree-sha1 = "439e35b0b36e2e5881738abc8857bd92ad6ff9a8"
 uuid = "d38c429a-6771-53c6-b99e-75d170b6e991"
 version = "0.6.3"
 
+[[deps.ConvexHulls2d]]
+deps = ["LinearAlgebra"]
+git-tree-sha1 = "cd7759cfeaf855fed46ec26a26fb323ac3a5501e"
+uuid = "438b5665-92b0-42e6-bc36-e4ac8449fa2d"
+version = "0.1.1"
+weakdeps = ["Makie"]
+
+    [deps.ConvexHulls2d.extensions]
+    ConvexHulls2dMakieExt = "Makie"
+
 [[deps.CoordinateTransformations]]
 deps = ["LinearAlgebra", "StaticArrays"]
 git-tree-sha1 = "a692f5e257d332de1e554e4566a4e5a8a72de2b2"
@@ -1037,6 +1143,11 @@ git-tree-sha1 = "fcbb72b032692610bfbdb15018ac16a36cf2e406"
 uuid = "adafc99b-e345-5852-983c-f28acb93d879"
 version = "0.3.1"
 
+[[deps.Crayons]]
+git-tree-sha1 = "249fe38abf76d48563e2f4556bebd215aa317e15"
+uuid = "a8cc5b0e-0ffa-5ad4-8c14-923d3ee1735f"
+version = "4.1.1"
+
 [[deps.CustomUnitRanges]]
 git-tree-sha1 = "1a3f97f907e6dd8983b744d2642651bb162a3f7a"
 uuid = "dc8bdbbb-1ca9-579f-8c36-e416f6a65cce"
@@ -1046,6 +1157,12 @@ version = "1.0.2"
 git-tree-sha1 = "abe83f3a2f1b857aac70ef8b269080af17764bbe"
 uuid = "9a962f9c-6df0-11e9-0e5d-c546b8b5ee8a"
 version = "1.16.0"
+
+[[deps.DataFrames]]
+deps = ["Compat", "DataAPI", "DataStructures", "Future", "InlineStrings", "InvertedIndices", "IteratorInterfaceExtensions", "LinearAlgebra", "Markdown", "Missings", "PooledArrays", "PrecompileTools", "PrettyTables", "Printf", "Random", "Reexport", "SentinelArrays", "SortingAlgorithms", "Statistics", "TableTraits", "Tables", "Unicode"]
+git-tree-sha1 = "fb61b4812c49343d7ef0b533ba982c46021938a6"
+uuid = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
+version = "1.7.0"
 
 [[deps.DataStructures]]
 deps = ["Compat", "InteractiveUtils", "OrderedCollections"]
@@ -1277,6 +1394,11 @@ git-tree-sha1 = "7a214fdac5ed5f59a22c2d9a885a16da1c74bbc7"
 uuid = "559328eb-81f9-559d-9380-de523a88c83c"
 version = "1.0.17+0"
 
+[[deps.Future]]
+deps = ["Random"]
+uuid = "9fa8497b-333b-5362-9e8d-4d0656e87820"
+version = "1.11.0"
+
 [[deps.GLFW_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Libglvnd_jll", "Xorg_libXcursor_jll", "Xorg_libXi_jll", "Xorg_libXinerama_jll", "Xorg_libXrandr_jll", "libdecor_jll", "xkbcommon_jll"]
 git-tree-sha1 = "fcb0584ff34e25155876418979d4c8971243bb89"
@@ -1418,6 +1540,12 @@ git-tree-sha1 = "33485b4e40d1df46c806498c73ea32dc17475c59"
 uuid = "cbc4b850-ae4b-5111-9e64-df94c024a13d"
 version = "0.3.1"
 
+[[deps.ImageComponentAnalysis]]
+deps = ["AbstractTrees", "ConvexHulls2d", "DataFrames", "DataStructures", "ImageFiltering", "LeftChildRightSiblingTrees", "LinearAlgebra", "OffsetArrays", "Parameters", "StaticArrays"]
+git-tree-sha1 = "0f1e954d54bafec3df4aa9d1ce1f110e311a9043"
+uuid = "d9b9e9a0-1569-11e9-2cb5-bbca914b0e89"
+version = "0.2.2"
+
 [[deps.ImageContrastAdjustment]]
 deps = ["ImageBase", "ImageCore", "ImageTransformations", "Parameters"]
 git-tree-sha1 = "eb3d4365a10e3f3ecb3b115e9d12db131d28a386"
@@ -1530,6 +1658,19 @@ git-tree-sha1 = "d1b1b796e47d94588b3757fe84fbf65a5ec4a80d"
 uuid = "d25df0c9-e2be-5dd7-82c8-3ad0b3e990b9"
 version = "0.1.5"
 
+[[deps.InlineStrings]]
+git-tree-sha1 = "8594fac023c5ce1ef78260f24d1ad18b4327b420"
+uuid = "842dd82b-1e85-43dc-bf29-5d0ee9dffc48"
+version = "1.4.4"
+
+    [deps.InlineStrings.extensions]
+    ArrowTypesExt = "ArrowTypes"
+    ParsersExt = "Parsers"
+
+    [deps.InlineStrings.weakdeps]
+    ArrowTypes = "31f734f8-188a-4ce0-8406-c8a06bd891cd"
+    Parsers = "69de0a69-1ddd-5017-9359-2bf0b02dc9f0"
+
 [[deps.IntegralArrays]]
 deps = ["ColorTypes", "FixedPointNumbers", "IntervalSets"]
 git-tree-sha1 = "b842cbff3f44804a84fda409745cc8f04c029a20"
@@ -1601,6 +1742,11 @@ weakdeps = ["Dates", "Test"]
     [deps.InverseFunctions.extensions]
     InverseFunctionsDatesExt = "Dates"
     InverseFunctionsTestExt = "Test"
+
+[[deps.InvertedIndices]]
+git-tree-sha1 = "6da3c4316095de0f5ee2ebd875df8721e7e0bdbe"
+uuid = "41ab1584-1d38-5bbf-9106-f11c6c58b48f"
+version = "1.3.1"
 
 [[deps.IrrationalConstants]]
 git-tree-sha1 = "e2222959fbc6c19554dc15174c81bf7bf3aa691c"
@@ -1731,6 +1877,12 @@ version = "1.11.0"
 git-tree-sha1 = "a560dd966b386ac9ae60bdd3a3d3a326062d3c3e"
 uuid = "8cdb02fc-e678-4876-92c5-9defec4f444e"
 version = "0.3.1"
+
+[[deps.LeftChildRightSiblingTrees]]
+deps = ["AbstractTrees"]
+git-tree-sha1 = "fb6803dafae4a5d62ea5cab204b1e657d9737e7f"
+uuid = "1d6d02ad-be62-4b6b-8a6d-2f90e265016e"
+version = "0.2.0"
 
 [[deps.LibCURL]]
 deps = ["LibCURL_jll", "MozillaCACerts_jll"]
@@ -2157,6 +2309,12 @@ git-tree-sha1 = "a14a99e430e42a105c898fcc7f212334bc7be887"
 uuid = "f27b6e38-b328-58d1-80ce-0feddd5e7a45"
 version = "3.2.4"
 
+[[deps.PooledArrays]]
+deps = ["DataAPI", "Future"]
+git-tree-sha1 = "36d8b4b899628fb92c2749eb488d884a926614d3"
+uuid = "2dfb63ee-cc39-5dd5-95bd-886bf059d720"
+version = "1.4.3"
+
 [[deps.PrecompileTools]]
 deps = ["Preferences"]
 git-tree-sha1 = "5aa36f7049a63a1528fe8f7c3f2113413ffd4e1f"
@@ -2168,6 +2326,12 @@ deps = ["TOML"]
 git-tree-sha1 = "9306f6085165d270f7e3db02af26a400d580f5c6"
 uuid = "21216c6a-2e73-6563-6e65-726566657250"
 version = "1.4.3"
+
+[[deps.PrettyTables]]
+deps = ["Crayons", "LaTeXStrings", "Markdown", "PrecompileTools", "Printf", "Reexport", "StringManipulation", "Tables"]
+git-tree-sha1 = "1101cd475833706e4d0e7b122218257178f48f34"
+uuid = "08abe8d2-0d0c-5749-adfa-8a2ac140af0d"
+version = "2.4.0"
 
 [[deps.Printf]]
 deps = ["Unicode"]
@@ -2353,6 +2517,12 @@ git-tree-sha1 = "3bac05bc7e74a75fd9cba4295cde4045d9fe2386"
 uuid = "6c6a2e73-6563-6170-7368-637461726353"
 version = "1.2.1"
 
+[[deps.SentinelArrays]]
+deps = ["Dates", "Random"]
+git-tree-sha1 = "712fb0231ee6f9120e005ccd56297abbc053e7e0"
+uuid = "91c51154-3ec4-41a3-a24f-3f23e20d615c"
+version = "1.4.8"
+
 [[deps.Serialization]]
 uuid = "9e88b42a-f829-5b0c-bbe9-9e923198166b"
 version = "1.11.0"
@@ -2505,6 +2675,12 @@ weakdeps = ["ChainRulesCore", "InverseFunctions"]
     [deps.StatsFuns.extensions]
     StatsFunsChainRulesCoreExt = "ChainRulesCore"
     StatsFunsInverseFunctionsExt = "InverseFunctions"
+
+[[deps.StringManipulation]]
+deps = ["PrecompileTools"]
+git-tree-sha1 = "725421ae8e530ec29bcbdddbe91ff8053421d023"
+uuid = "892a3eda-7b42-436c-8928-eab12a02cf0e"
+version = "0.4.1"
 
 [[deps.StructArrays]]
 deps = ["ConstructionBase", "DataAPI", "Tables"]
@@ -3049,5 +3225,19 @@ version = "1.8.1+0"
 # ╠═e7b0f36b-9bb7-44a1-8728-e2fbf83057e1
 # ╠═af13f2f2-cc01-43e6-a7fb-7fd1b780e959
 # ╠═08274f49-c9f0-41bd-bc37-7217b5537336
+# ╠═7938c75d-b3c9-45de-9e13-208ab4389d91
+# ╠═f9d5e221-1a26-454d-84c1-98df95876575
+# ╠═9f809ece-9f79-49ba-978f-a143b02b9c52
+# ╠═59ccb51d-39a9-48e6-a60d-95d22beb65c3
+# ╠═2ec5e25f-038b-4913-a0ac-d51fabde4be3
+# ╠═dcdecba1-85c1-4e4c-b722-70fa91e84c38
+# ╠═cc3cf8af-6467-4693-bc40-77088a89d035
+# ╠═2f597403-3fa1-4c46-baeb-b9dc443cd5f7
+# ╠═2d2f6725-f0e6-4063-a21e-43c08286fe98
+# ╠═5e359c07-9bbd-4d9c-98fd-38e5f8d846d4
+# ╠═bd424fe7-c49b-4a7c-bd87-da8c68d29c63
+# ╠═9d2c4ff0-6626-4a69-9347-c2b300954cea
+# ╠═2d571042-4e4a-43ff-a376-862e0cb8c5c4
+# ╠═e59ebf54-233f-42cb-84a4-19f24f4f94b3
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
